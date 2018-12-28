@@ -1,6 +1,7 @@
 import os
-import tensorflow as tf
+import vgg19
 import argparse
+import tensorflow as tf
 
 from model import style_GAN_
 from utils import check_folder
@@ -20,11 +21,17 @@ def parse_args():
                         help='Directory to save training logs')
     parser.add_argument('--model_dir', type=str, default='model',
                         help='Directory to save the model')
+    parser.add_argument('--content_layers', nargs='+', type=str, default=['conv4_2'], help='VGG19 layers used for content loss')
+    parser.add_argument('--style_layers', nargs='+', type=str, default=['relu1_1', 'relu2_1', 'relu3_1', 'relu4_1', 'relu5_1'],
+                        help='VGG19 layers used for style loss')
+    parser.add_argument('--content_layer_weights', nargs='+', type=float, default=[1.0], help='Content loss for each content is multiplied by corresponding weight')
+    parser.add_argument('--style_layer_weights', nargs='+', type=float, default=[.2,.2,.2,.2,.2],
+                        help='Style loss for each content is multiplied by corresponding weight')
     parser.add_argument('--dataset_name', type=str, default='mnist',choices=['mnist', 'coco'],
                         help='Name of the dataset')
     parser.add_argument('--vgg_path', type=str, default='../vgg-model/imagenet-vgg-verydeep-19.mat',
                         help='Directory to load the pretrained vgg model')
-    parser.add_argument('--style_strength', type=float, default='1.',
+    parser.add_argument('--loss_ratio', type=float, default='1e-3',
                         help='the strength of the style loss')
 
     return check_args(parser.parse_args())
@@ -55,8 +62,18 @@ def main():
     if args is None:
         exit()
 
+    CONTENT_LAYERS = {}
+    for layer, weight in zip(args.content_layers, args.content_layer_weights):
+        CONTENT_LAYERS[layer] = weight
+
+    STYLE_LAYERS = {}
+    for layer, weight in zip(args.style_layers, args.style_layer_weights):
+        STYLE_LAYERS[layer] = weight
+
     # open session
     with tf.Session(config=tf.ConfigProto(allow_soft_placement=True)) as sess:
+        vgg = vgg19.VGG19(args.vgg_path)
+
         model = style_GAN_(sess,
                            epoch=args.epoch,
                            batch_size=args.batch_size,
@@ -65,8 +82,10 @@ def main():
                            log_dir=args.log_dir,
                            model_dir=args.model_dir,
                            dataset_name=args.dataset_name,
-                           vgg_path=args.vgg_path,
-                           style_strength=args.style_strength)
+                           net=vgg,
+                           loss_ratio=args.loss_ratio,
+                           content_layer_ids = CONTENT_LAYERS,
+                           style_layers_ids = STYLE_LAYERS)
 
         # buld_graph
         model.build_model()

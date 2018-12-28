@@ -3,6 +3,7 @@ import os
 import time
 import tensorflow as tf
 import numpy as np
+import collections
 
 from ops import *
 from vgg19 import *
@@ -19,8 +20,10 @@ class style_GAN_(object):
                  log_dir,
                  model_dir,
                  dataset_name,
-                 vgg_path,
-                 style_strength):
+                 net,
+                 loss_ratio,
+                 content_layer_ids,
+                 style_layers_ids):
         self.sess = sess
         self.epoch = epoch
         self.batch_size = batch_size
@@ -28,10 +31,13 @@ class style_GAN_(object):
         self.result_dir = result_dir
         self.log_dir = log_dir
         self.model_dir = model_dir
-        self.vgg_path = vgg_path
-        self.style_strength = style_strength
-        self.content_layers = [('conv4_2',1.)]
-        self.style_layers = [('conv1_1',1.),('conv2_1',1.),('conv3_1',1.),('conv4_1',1.),('conv5_1',1.)]
+        self.net = net
+        self.loss_ratio = loss_ratio
+        self.CONTENT_LAYERS = collections.OrderedDict(sorted(content_layer_ids.items()))
+        self.STYLE_LAYERS = collections.OrderedDict(sorted(style_layers_ids.items()))
+        print("CONTENT_LAYERS: ", self.CONTENT_LAYERS)
+        print("STYLE_LAYERS: ", self.STYLE_LAYERS)
+        print("="*50)
 
         if dataset_name == 'mnist':
             # parameters
@@ -55,34 +61,7 @@ class style_GAN_(object):
         else:
             raise NotImplementedError
 
-    def build_vgg19(self, path):
-        net = {}
-        vgg_rawnet = io.loadmat(path)
-        vgg_layers = vgg_rawnet['layers'][0]
-        net['input'] = tf.Variable(np.zeros((self.batch_size, self.input_height, self.input_width, self.input_channel)).astype('float32'))
-        net['conv1_1'] = build_net('conv', net['input'], get_weight_bias(vgg_layers, 0))
-        net['conv1_2'] = build_net('conv', net['conv1_1'], get_weight_bias(vgg_layers, 2))
-        net['pool1'] = build_net('pool', net['conv1_2'])
-        net['conv2_1'] = build_net('conv', net['pool1'], get_weight_bias(vgg_layers, 5))
-        net['conv2_2'] = build_net('conv', net['conv2_1'], get_weight_bias(vgg_layers, 7))
-        net['pool2'] = build_net('pool', net['conv2_2'])
-        net['conv3_1'] = build_net('conv', net['pool2'], get_weight_bias(vgg_layers, 10))
-        net['conv3_2'] = build_net('conv', net['conv3_1'], get_weight_bias(vgg_layers, 12))
-        net['conv3_3'] = build_net('conv', net['conv3_2'], get_weight_bias(vgg_layers, 14))
-        net['conv3_4'] = build_net('conv', net['conv3_3'], get_weight_bias(vgg_layers, 16))
-        net['pool3'] = build_net('pool', net['conv3_4'])
-        net['conv4_1'] = build_net('conv', net['pool3'], get_weight_bias(vgg_layers, 19))
-        net['conv4_2'] = build_net('conv', net['conv4_1'], get_weight_bias(vgg_layers, 21))
-        net['conv4_3'] = build_net('conv', net['conv4_2'], get_weight_bias(vgg_layers, 23))
-        net['conv4_4'] = build_net('conv', net['conv4_3'], get_weight_bias(vgg_layers, 25))
-        net['pool4'] = build_net('pool', net['conv4_4'])
-        net['conv5_1'] = build_net('conv', net['pool4'], get_weight_bias(vgg_layers, 28))
-        net['conv5_2'] = build_net('conv', net['conv5_1'], get_weight_bias(vgg_layers, 30))
-        net['conv5_3'] = build_net('conv', net['conv5_2'], get_weight_bias(vgg_layers, 32))
-        net['conv5_4'] = build_net('conv', net['conv5_3'], get_weight_bias(vgg_layers, 34))
-        net['pool5'] = build_net('pool', net['conv5_4'])
 
-        return net
 
     def generator(self, image, training, is_training=True, reuse=False):
         with tf.variable_scope("generator", reuse=reuse):
@@ -181,28 +160,71 @@ class style_GAN_(object):
 
         """ G and D's value get """
         G = self.generator(self.raw_image, training=True, is_training=True, reuse=False)
-        print("G: ", G)
+        print("G1: ", G)
         D_real_logits = self.discriminator(self.raw_image, is_training=True, reuse=False)
         D_fake_logits = self.discriminator(G, is_training=True, reuse=True)
-
-        """ Vgg19 value get"""
-        vgg19_1 = self.build_vgg19(self.vgg_path)
-        vgg19_2 = self.build_vgg19(self.vgg_path)
+        print("G2: ", G)
 
         """ Loss Function """
-        # content loss
-        vgg19_1['input'].assign(G)
-        vgg19_2['input'].assign(self.raw_image)
-        self.cost_content = sum(map(lambda l: l[1]*build_content_loss(vgg19_1[l[0]],
-                                                                  vgg19_2[l[0]]), self.content_layers))
-        # style loss
-        # it seems that the shape will give some bug
-        vgg19_1['input'].assign(G)
-        vgg19_2['input'].assign(self.raw_image)
-        self.cost_style = sum(map(lambda l: l[1]*build_style_loss(vgg19_1[l[0]],
-                                                              vgg19_2[l[0]]), self.style_layers))
+        # get content-layer-feature for content loss
+        content_layers = self.net.feed_forward(self.raw_image, scope='content')
+        self.Ps = {}
+        for id in self.CONTENT_LAYERS:
+            print("content_id: ", id)
+            self.Ps[id] = content_layers[id]
 
-        self.cost_total = self.cost_content + self.style_strength * self.cost_style
+        # get style-layer-feature for style loss
+        style_layers = self.net.feed_forward(self.sty_image, scope='style')
+        self.As = {}
+        for id in self.STYLE_LAYERS:
+            print("style_id: ", id)
+            self.As[id] = self._gram_matrix(style_layers[id])
+
+        # get layer-values for G
+        self.Fs = self.net.feed_forward(G, scope='mixed')
+        print("G3: ", G)
+
+        """ compute loss """
+        L_content = 0
+        L_style = 0
+        for id in self.Fs:
+            if id in self.CONTENT_LAYERS:
+                # content loss
+                F = self.Fs[id]
+                P = self.Ps[id]
+
+                bs, h, w, d = F.get_shape() # first return value is batch_size
+                N = h.value*w.value # product of width and height
+                M = d.value # number of filters
+
+                w = self.CONTENT_LAYERS[id] # weight for this layer
+
+                # add the bs.value
+                L_content += w * (1./(2. * np.sqrt(M) * np.sqrt(N)) * bs.value) * tf.reduce_sum(tf.pow((F - P), 2))
+            elif id in self.STYLE_LAYERS:
+                # style loss
+                F = self.Fs[id]
+
+                bs, h, w, d = F.get_shape()
+                N = h.value * w.value
+                M = d.value
+
+                w = self.STYLE_LAYERS[id]
+
+                G_ = self._gram_matrix(F)
+                A = self.As[id]
+
+                # add the bs.value
+                L_style += w * (1./(4 * N**2 * M**2 * bs.value)) * tf.reduce_sum(tf.pow((G_-A), 2))
+
+        alpha = self.loss_ratio
+        beta = 1
+
+        self.L_content = L_content
+        self.L_style = L_style
+        self.L_total = alpha*L_content + beta*L_style
+
+        print("G4: ", G)
 
         # discriminator loss
         d_loss_real = - tf.reduce_mean(D_real_logits)
@@ -214,6 +236,7 @@ class style_GAN_(object):
 
         """ Gradient Penalty """
         alpha = tf.random_uniform(shape=self.raw_image.get_shape(), minval=0., maxval=1.)
+        print("G: ", G)
         differences = G - self.raw_image
         interpolates = self.raw_image + (alpha * differences)
         D_inter = self.discriminator(interpolates, is_training=True, reuse=True)
@@ -234,8 +257,8 @@ class style_GAN_(object):
             self.g_optim = tf.train.AdamOptimizer(self.learning_rate,
                                                   beta1=self.beta1).minimize(self.g_loss, var_list=g_vars)
             # For style optim, we also just renew the generator parameters
-            # self.s_optim = tf.train.AdamOptimizer(self.learning_rate,
-            #                                       beta1=self.beta1).minimize(self.cost_total, var_list=g_vars)
+            self.s_optim = tf.train.AdamOptimizer(self.learning_rate,
+                                                  beta1=self.beta1).minimize(self.L_total, var_list=g_vars)
 
         """ Testing """
         # for test
@@ -246,14 +269,14 @@ class style_GAN_(object):
         d_loss_fake_sum = tf.summary.scalar("d_loss_fake", d_loss_fake)
         d_loss_sum = tf.summary.scalar("d_loss", self.d_loss)
         g_loss_sum = tf.summary.scalar("g_loss", self.g_loss)
-        self.cost_content_ = tf.summary.scalar("cost_content", self.cost_content)
-        self.cost_style_ = tf.summary.scalar("cost_style", self.cost_style)
-        self.cost_total_ = tf.summary.scalar("cost_total_", self.cost_total)
+        self.L_content_sum = tf.summary.scalar("cost_content", self.L_content)
+        self.L_style_sum = tf.summary.scalar("cost_style", self.L_style)
+        self.L_total_sum = tf.summary.scalar("cost_total_", self.L_total)
 
         # final summary operations
         self.g_sum = tf.summary.merge([d_loss_fake_sum, g_loss_sum])
         self.d_sum = tf.summary.merge([d_loss_real_sum, d_loss_sum])
-        self.s_sum = tf.summary.merge([self.cost_content_, self.cost_style_, self.cost_total_])
+        self.s_sum = tf.summary.merge([self.L_content_sum, self.L_style_sum, self.L_total_sum])
 
     def train(self):
 
@@ -278,10 +301,6 @@ class style_GAN_(object):
             counter = 1
             print(" [!] Load failed...")
 
-        # get the style image
-        def getstyle():
-            pass
-
         # loop for epoch
         start_time = time.time()
         for epoch in range(start_epoch, self.epoch):
@@ -295,7 +314,7 @@ class style_GAN_(object):
                 self.writer.add_summary(summary_str, counter)
 
                 # update style network
-                _, summary_str, content_loss, style_loss, total_loss = self.sess.run([self.s_optim, self.s_sum, self.cost_content, self.cost_style_, self.cost_total_],
+                _, summary_str, L_content, L_style, L_total = self.sess.run([self.s_optim, self.s_sum, self.L_content, self.L_style, self.L_total],
                                                                                      feed_dict={self.raw_image: batch_images, self.sty_image: batch_images})
                 self.writer.add_summary(summary_str, counter)
 
@@ -309,7 +328,7 @@ class style_GAN_(object):
 
                 # display training status
                 print("Epoch: [%2d] [%4d/%4d] time: %4.4f, d_loss: %.8f, g_loss:%.8f, content_loss: %.8f, style_loss: %.8f, total_loss: %.8f"
-                      % (epoch, idx, self.num_batches, time.time() - start_time, d_loss, g_loss, content_loss, style_loss, total_loss))
+                      % (epoch, idx, self.num_batches, time.time() - start_time, d_loss, g_loss, L_content, L_style, L_total))
 
                 # save training results for every 300 steps
                 if np.mod(counter, 300) == 0:
@@ -331,7 +350,6 @@ class style_GAN_(object):
 
         # save model for final step
         self.save(self.checkpoint_dir, counter)
-
 
     def load(self, checkpoint_dir):
         import re
@@ -363,3 +381,21 @@ class style_GAN_(object):
 
         save_images(samples[:image_frame_dim * image_frame_dim, :, :, :], [image_frame_dim, image_frame_dim],
                     check_folder(self.result_dir + '/' + self.model_dir) + '/' + '_epoch%03d' % epoch + '_test_all_classes.png')
+
+    def _gram_matrix(self, tensor):
+        shape = tensor.get_shape()
+
+        # Get the number of feature channels for the input tensor,
+        # which is assumed to be from a convolutional layer with 4-dim
+        num_channels = int(shape[3])
+
+        # Reshape the tensor so it is a 2-dim matrix. This essentially
+        # flattens the contents of each feature-channel.
+        matrix = tf.reshape(tensor, shape=[self.batch_size, -1, num_channels])
+
+        # Calculate the Gram-matrix as the matrix-product of
+        # the 2-dim matrix with itself. This calulates the
+        # dot-products of all combinations of the feature-channels.
+        gram = tf.matmul(tf.transpose(matrix, perm=[0,2,1]), matrix)
+
+        return gram

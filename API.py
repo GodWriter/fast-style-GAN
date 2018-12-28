@@ -39,11 +39,8 @@ import tensorflow as tf
 # # print("a.shape: ", a_shape)
 # # print("b.shape: ", b_shape)
 # # print("c.shape: ", c_shape)
-# import scipy.io as io
-#
-# vgg_rawnet = io.loadmat('../vgg-model/imagenet-vgg-verydeep-19.mat')
-# vgg_layers = vgg_rawnet['layers'][0]
-# print(vgg_rawnet)
-#
-# pow(2, 3)
-# print(pow(2,3))
+import scipy.io as io
+
+vgg_rawnet = io.loadmat('../vgg-model/imagenet-vgg-verydeep-19.mat')
+vgg_layers = vgg_rawnet.keys()
+print(vgg_layers)
