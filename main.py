@@ -1,4 +1,3 @@
-import os
 import vgg19
 import argparse
 import tensorflow as tf
@@ -12,7 +11,9 @@ def parse_args():
     parser = argparse.ArgumentParser(description=desc)
 
     parser.add_argument('--epoch', type=int, default=20, help='The number of epochs to run')
-    parser.add_argument('--batch_size', type=int, default=64, help='The size of batch')
+    parser.add_argument('--batch_size', type=int, default=32, help='The size of batch')
+    parser.add_argument('--folder_path', type=str, default='data', help='Path of the dataset')
+    parser.add_argument('--style_image', type=str, default='style.jpg', help='Path of the style image')
     parser.add_argument('--checkpoint_dir', type=str, default='checkpoint',
                         help='Directory to save the checkpoints')
     parser.add_argument('--result_dir', type=str, default='results',
@@ -27,7 +28,7 @@ def parse_args():
     parser.add_argument('--content_layer_weights', nargs='+', type=float, default=[1.0], help='Content loss for each content is multiplied by corresponding weight')
     parser.add_argument('--style_layer_weights', nargs='+', type=float, default=[.2,.2,.2,.2,.2],
                         help='Style loss for each content is multiplied by corresponding weight')
-    parser.add_argument('--dataset_name', type=str, default='mnist',choices=['mnist', 'coco'],
+    parser.add_argument('--dataset_name', type=str, default='shipData',choices=['shipdata', 'coco'],
                         help='Name of the dataset')
     parser.add_argument('--vgg_path', type=str, default='../vgg-model/imagenet-vgg-verydeep-19.mat',
                         help='Directory to load the pretrained vgg model')
@@ -77,6 +78,8 @@ def main():
         model = style_GAN_(sess,
                            epoch=args.epoch,
                            batch_size=args.batch_size,
+                           folder_path=args.folder_path,
+                           style_image_path=args.style_image,
                            checkpoint_dir=args.checkpoint_dir,
                            result_dir=args.result_dir,
                            log_dir=args.log_dir,
@@ -87,7 +90,7 @@ def main():
                            content_layer_ids = CONTENT_LAYERS,
                            style_layers_ids = STYLE_LAYERS)
 
-        # buld_graph
+        # build_graph
         model.build_model()
 
         # launch the graph in a session

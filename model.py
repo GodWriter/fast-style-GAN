@@ -1,20 +1,20 @@
 from __future__ import division
-import os
+
 import time
-import tensorflow as tf
-import numpy as np
 import collections
 
 from ops import *
 from vgg19 import *
 from utils import *
-import scipy.io as io
+from data_loader import shipData
 
 class style_GAN_(object):
     def __init__(self,
                  sess,
                  epoch,
                  batch_size,
+                 folder_path,
+                 style_image_path,
                  checkpoint_dir,
                  result_dir,
                  log_dir,
@@ -27,6 +27,8 @@ class style_GAN_(object):
         self.sess = sess
         self.epoch = epoch
         self.batch_size = batch_size
+        self.folder_path = folder_path
+        self.style_image_path = style_image_path
         self.checkpoint_dir = checkpoint_dir
         self.result_dir = result_dir
         self.log_dir = log_dir
@@ -39,11 +41,12 @@ class style_GAN_(object):
         print("STYLE_LAYERS: ", self.STYLE_LAYERS)
         print("="*50)
 
-        if dataset_name == 'mnist':
+        if dataset_name == 'shipData':
             # parameters
-            self.input_height = 28
-            self.input_width = 28
+            self.input_height = 32
+            self.input_width = 32
             self.input_channel = 3
+            self.shape = [self.input_height, self.input_width]
 
             # WGAN-GP parameter
             self.lambd = 0.25
@@ -54,10 +57,12 @@ class style_GAN_(object):
             self.beta1 = 0.5
 
             # test
-            self.sample_num = 64
+            self.sample_num = 32
 
             # get number of batched for a single epoch
-            self.num_batches = len(mnist.train.images) // self.batch_size
+            self.dataloader = shipData(self.shape, self.folder_path)
+            print()
+            self.num_batches = int(self.dataloader.data_len / self.batch_size)
         else:
             raise NotImplementedError
 
@@ -156,7 +161,7 @@ class style_GAN_(object):
         """ Graph Input """
         # To let the computation be easy, we give the same batch_size style image
         self.raw_image = tf.placeholder(tf.float32, [bs] + image_dims, name='raw_images')
-        self.sty_image = tf.placeholder(tf.float32, [bs] + image_dims, name='sty_image')
+        self.sty_image = tf.placeholder(tf.float32, [1] + image_dims, name='sty_image')
 
         """ G and D's value get """
         G = self.generator(self.raw_image, training=True, is_training=True, reuse=False)
@@ -293,6 +298,8 @@ class style_GAN_(object):
         # restore check-point if it exits
         could_load, checkpoint_counter = self.load(self.checkpoint_dir)
         if could_load:
+            print("self.num_batches: ", self.num_batches)
+            print("checkpoint_counter: ", checkpoint_counter)
             start_epoch = (int)(checkpoint_counter / self.num_batches)
             counter = checkpoint_counter
             print( "[*] Load SUCCESS")
@@ -303,10 +310,11 @@ class style_GAN_(object):
 
         # loop for epoch
         start_time = time.time()
+        style_image = load_style_image(self.style_image_path, self.shape)
         for epoch in range(start_epoch, self.epoch):
 
             for idx in range(0, self.num_batches):
-                batch_images, _ = mnist.train.next_batch(self.batch_size)
+                batch_images = self.dataloader.next_batch(self.batch_size)
 
                 # update D network
                 _, summary_str, d_loss = self.sess.run([self.d_optim, self.d_sum, self.d_loss],
@@ -315,7 +323,7 @@ class style_GAN_(object):
 
                 # update style network
                 _, summary_str, L_content, L_style, L_total = self.sess.run([self.s_optim, self.s_sum, self.L_content, self.L_style, self.L_total],
-                                                                                     feed_dict={self.raw_image: batch_images, self.sty_image: batch_images})
+                                                                                     feed_dict={self.raw_image: batch_images, self.sty_image: style_image})
                 self.writer.add_summary(summary_str, counter)
 
                 # update G network
@@ -331,10 +339,10 @@ class style_GAN_(object):
                       % (epoch, idx, self.num_batches, time.time() - start_time, d_loss, g_loss, L_content, L_style, L_total))
 
                 # save training results for every 300 steps
-                if np.mod(counter, 300) == 0:
+                if np.mod(counter, 1) == 0:
                     samples = self.sess.run(self.fake_images,
                                             feed_dict={self.raw_image: batch_images})
-                    tot_num_samples = min(self.sample_run, self.batch_size)
+                    tot_num_samples = min(self.sample_num, self.batch_size)
                     # floor(-2.5) == -3
                     manifold_h = int(np.floor(np.sqrt(tot_num_samples)))
                     manifold_w = int(np.floor(np.sqrt(tot_num_samples)))
@@ -376,7 +384,7 @@ class style_GAN_(object):
         image_frame_dim = int(np.floor(np.sqrt(tot_num_samples)))
 
         """ random condition, random noise """
-        samplex, _ = mnist.train.next_batch(self.batch_size)
+        samplex = self.dataloader.next_batch(self.batch_size)
         samples = self.sess.run(self.fake_images, feed_dict={self.raw_image: samplex})
 
         save_images(samples[:image_frame_dim * image_frame_dim, :, :, :], [image_frame_dim, image_frame_dim],
@@ -391,7 +399,7 @@ class style_GAN_(object):
 
         # Reshape the tensor so it is a 2-dim matrix. This essentially
         # flattens the contents of each feature-channel.
-        matrix = tf.reshape(tensor, shape=[self.batch_size, -1, num_channels])
+        matrix = tf.reshape(tensor, shape=[1, -1, num_channels])
 
         # Calculate the Gram-matrix as the matrix-product of
         # the 2-dim matrix with itself. This calulates the
@@ -399,3 +407,11 @@ class style_GAN_(object):
         gram = tf.matmul(tf.transpose(matrix, perm=[0,2,1]), matrix)
 
         return gram
+
+    def save(self, checkpoint_dir, step):
+        checkpoint_dir = os.path.join(checkpoint_dir, self.model_dir)
+
+        if not os.path.exists(checkpoint_dir):
+            os.makedirs(checkpoint_dir)
+
+        self.saver.save(self.sess,os.path.join(checkpoint_dir, 'style-gan.model'), global_step=step)

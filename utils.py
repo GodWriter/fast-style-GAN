@@ -1,21 +1,10 @@
 from __future__ import division
 
-from tensorflow.examples.tutorials.mnist import input_data
-
-import math
-import random
-import pprint
 import scipy.misc
 import numpy as np
-from time import gmtime, strftime
-from six.moves import xrange
 import matplotlib.pyplot as plt
-import os, gzip
-
-import tensorflow as tf
-
-data_path = "C:\\Users\\18917\\PycharmProjects\\data"
-mnist = input_data.read_data_sets(data_path, one_hot=True)
+import os
+import PIL.Image as im
 
 def check_folder(log_dir):
     if not os.path.exists(log_dir):
@@ -105,3 +94,13 @@ def discrete_cmap(N, base_cmap=None):
     color_list = base(np.linspace(0, 1, N))
     cmap_name = base.name + str(N)
     return base.from_list(cmap_name, color_list, N)
+
+def load_style_image(folder_path, shape):
+    data_shape = [1] + shape + [3]
+
+    data = np.zeros(data_shape)
+    image = im.open(folder_path)
+    image = image.resize(shape, im.LANCZOS)
+    data[0,:,:,:] = np.float32(image)
+
+    return data
