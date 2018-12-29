@@ -10,8 +10,8 @@ def parse_args():
     desc = "Tensorflow implementation of fast-style-GAN"
     parser = argparse.ArgumentParser(description=desc)
 
-    parser.add_argument('--epoch', type=int, default=20, help='The number of epochs to run')
-    parser.add_argument('--batch_size', type=int, default=32, help='The size of batch')
+    parser.add_argument('--epoch', type=int, default=30, help='The number of epochs to run')
+    parser.add_argument('--batch_size', type=int, default=16, help='The size of batch')
     parser.add_argument('--folder_path', type=str, default='data', help='Path of the dataset')
     parser.add_argument('--style_image', type=str, default='style.jpg', help='Path of the style image')
     parser.add_argument('--checkpoint_dir', type=str, default='checkpoint',

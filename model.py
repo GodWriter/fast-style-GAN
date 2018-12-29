@@ -43,8 +43,8 @@ class style_GAN_(object):
 
         if dataset_name == 'shipData':
             # parameters
-            self.input_height = 32
-            self.input_width = 32
+            self.input_height = 64
+            self.input_width = 64
             self.input_channel = 3
             self.shape = [self.input_height, self.input_width]
 
@@ -61,7 +61,6 @@ class style_GAN_(object):
 
             # get number of batched for a single epoch
             self.dataloader = shipData(self.shape, self.folder_path)
-            print()
             self.num_batches = int(self.dataloader.data_len / self.batch_size)
         else:
             raise NotImplementedError
@@ -216,7 +215,7 @@ class style_GAN_(object):
 
                 w = self.STYLE_LAYERS[id]
 
-                G_ = self._gram_matrix(F)
+                G_ = self._gram_matrix_batch(F)
                 A = self.As[id]
 
                 # add the bs.value
@@ -270,13 +269,13 @@ class style_GAN_(object):
         self.fake_images = self.generator(self.raw_image, training=False, is_training=False, reuse=True)
 
         """ Summary """
-        d_loss_real_sum = tf.summary.scalar("d_loss_real", d_loss_real)
-        d_loss_fake_sum = tf.summary.scalar("d_loss_fake", d_loss_fake)
-        d_loss_sum = tf.summary.scalar("d_loss", self.d_loss)
-        g_loss_sum = tf.summary.scalar("g_loss", self.g_loss)
-        self.L_content_sum = tf.summary.scalar("cost_content", self.L_content)
-        self.L_style_sum = tf.summary.scalar("cost_style", self.L_style)
-        self.L_total_sum = tf.summary.scalar("cost_total_", self.L_total)
+        d_loss_real_sum = tf.summary.scalar("dloss/d_loss_real", d_loss_real)
+        d_loss_fake_sum = tf.summary.scalar("dloss/d_loss_fake", d_loss_fake)
+        d_loss_sum = tf.summary.scalar("dloss/d_loss", self.d_loss)
+        g_loss_sum = tf.summary.scalar("gloss/g_loss", self.g_loss)
+        self.L_content_sum = tf.summary.scalar("sloss/L_content", self.L_content)
+        self.L_style_sum = tf.summary.scalar("sloss/L_style", self.L_style)
+        self.L_total_sum = tf.summary.scalar("sloss/L_total", self.L_total)
 
         # final summary operations
         self.g_sum = tf.summary.merge([d_loss_fake_sum, g_loss_sum])
@@ -335,10 +334,10 @@ class style_GAN_(object):
                 counter += 1
 
                 # display training status
-                print("Epoch: [%2d] [%4d/%4d] time: %4.4f, d_loss: %.8f, g_loss:%.8f, content_loss: %.8f, style_loss: %.8f, total_loss: %.8f"
+                print("Epoch: [%2d] [%4d/%4d] time: %4.4f, d_loss: %.8f, g_loss:%.8f, L_content: %.8f, L_style: %.8f, L_total: %.8f"
                       % (epoch, idx, self.num_batches, time.time() - start_time, d_loss, g_loss, L_content, L_style, L_total))
 
-                # save training results for every 300 steps
+                # save training results for every 10 steps
                 if np.mod(counter, 1) == 0:
                     samples = self.sess.run(self.fake_images,
                                             feed_dict={self.raw_image: batch_images})
@@ -400,6 +399,24 @@ class style_GAN_(object):
         # Reshape the tensor so it is a 2-dim matrix. This essentially
         # flattens the contents of each feature-channel.
         matrix = tf.reshape(tensor, shape=[1, -1, num_channels])
+
+        # Calculate the Gram-matrix as the matrix-product of
+        # the 2-dim matrix with itself. This calulates the
+        # dot-products of all combinations of the feature-channels.
+        gram = tf.matmul(tf.transpose(matrix, perm=[0,2,1]), matrix)
+
+        return gram
+
+    def _gram_matrix_batch(self, tensor):
+        shape = tensor.get_shape()
+
+        # Get the number of feature channels for the input tensor,
+        # which is assumed to be from a convolutional layer with 4-dim
+        num_channels = int(shape[3])
+
+        # Reshape the tensor so it is a 2-dim matrix. This essentially
+        # flattens the contents of each feature-channel.
+        matrix = tf.reshape(tensor, shape=[self.batch_size, -1, num_channels])
 
         # Calculate the Gram-matrix as the matrix-product of
         # the 2-dim matrix with itself. This calulates the
